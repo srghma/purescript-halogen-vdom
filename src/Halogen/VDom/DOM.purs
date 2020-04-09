@@ -25,12 +25,14 @@ import Web.DOM.Element (Element) as DOM
 import Web.DOM.Element as DOMElement
 import Web.DOM.Node (Node) as DOM
 
+-- give me vdom, I will buidl node
 type VDomMachine a w = Machine (VDom a w) DOM.Node
 
 type VDomStep a w = Step (VDom a w) DOM.Node
 
 type VDomInit i a w = EFn.EffectFn1 i (VDomStep a w)
 
+-- (VDomSpec a w) -> (VDOM a w -> Step (VDOM a w) DOM.Node) -> i -> Step (VDOM a w) DOM.Node
 type VDomBuilder i a w = EFn.EffectFn3 (VDomSpec a w) (VDomMachine a w) i (VDomStep a w)
 
 type VDomBuilder4 i j k l a w = EFn.EffectFn6 (VDomSpec a w) (VDomMachine a w) i j k l (VDomStep a w)
@@ -38,9 +40,9 @@ type VDomBuilder4 i j k l a w = EFn.EffectFn6 (VDomSpec a w) (VDomMachine a w) i
 -- | Widget machines recursively reference the configured spec to potentially
 -- | enable recursive trees of Widgets.
 newtype VDomSpec a w = VDomSpec
-  { buildWidget ∷ VDomSpec a w → Machine w DOM.Node
+  { buildWidget ∷ VDomSpec a w → Machine w DOM.Node -- contains recursive ref
   , buildAttributes ∷ DOM.Element → Machine a Unit
-  , document ∷ DOM.Document
+  , document ∷ DOM.Document -- TODO: why?
   }
 
 -- | Starts an initial `VDom` machine by providing a `VDomSpec`.
@@ -53,14 +55,14 @@ newtype VDomSpec a w = VDomSpec
 -- |   ...
 -- | ````
 buildVDom ∷ ∀ a w. VDomSpec a w → VDomMachine a w
-buildVDom spec = build
+buildVDom spec = build -- initial vdomTree
   where
   build = EFn.mkEffectFn1 case _ of
-    Text s → EFn.runEffectFn3 buildText spec build s
+    Text s → EFn.runEffectFn3 buildText spec build s -- build text machine
     Elem ns n a ch → EFn.runEffectFn6 buildElem spec build ns n a ch
     Keyed ns n a ch → EFn.runEffectFn6 buildKeyed spec build ns n a ch
-    Widget w → EFn.runEffectFn3 buildWidget spec build w
-    Grafted g → EFn.runEffectFn1 build (runGraft g)
+    Widget w → EFn.runEffectFn3 buildWidget spec build w -- TODO: ????
+    Grafted g → EFn.runEffectFn1 build (runGraft g) -- TODO: ????
 
 type TextState a w =
   { build ∷ VDomMachine a w
@@ -71,7 +73,7 @@ type TextState a w =
 buildText ∷ ∀ a w. VDomBuilder String a w
 buildText = EFn.mkEffectFn3 \(VDomSpec spec) build s → do
   node ← EFn.runEffectFn2 Util.createTextNode s spec.document
-  let state = { build, node, value: s }
+  let (state :: TextState a w) = { build, node, value: s } -- why build is passed
   pure $ mkStep $ Step node state patchText haltText
 
 patchText ∷ ∀ a w. EFn.EffectFn2 (TextState a w) (VDom a w) (VDomStep a w)

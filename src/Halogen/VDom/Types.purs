@@ -22,7 +22,13 @@ import Unsafe.Coerce (unsafeCoerce)
 -- | control over the lifecycle of some `DOM.Node`.
 -- |
 -- | The `Grafted` constructor and associated machinery enables `bimap`
--- | fusion using a Coyoneda-like encoding.
+-- | fusion using a Coyoneda-like encoding. WHAT???
+-- bimap - map a and w
+-- coyoneda - obj ((i -> r), f i)
+
+-- what is attributes - e.g. indexed attributes
+-- what is widget - e.g. ComponentSlot
+
 data VDom a w
   = Text String
   | Elem (Maybe Namespace) ElemName a (Array (VDom a w))
@@ -30,10 +36,10 @@ data VDom a w
   | Widget w
   | Grafted (Graft a w)
 
-instance functorVDom ∷ Functor (VDom a) where
+instance functorVDom ∷ Functor (VDom a) where -- when vdom is mapped - it is not really mapped
   map g (Text a) = Text a
-  map g (Grafted a) = Grafted (map g a)
-  map g a = Grafted (graft (Graft identity g a))
+  map g (Grafted a) = Grafted (map g a) -- map graft
+  map g a = Grafted (graft (Graft identity g a)) -- create graft, map later, dont map attributes, map widget
 
 instance bifunctorVDom ∷ Bifunctor VDom where
   bimap f g (Text a) = Text a
@@ -87,7 +93,7 @@ runGraft =
       go (Elem ns n a ch) = Elem ns n (fa a) (map go ch)
       go (Keyed ns n a ch) = Keyed ns n (fa a) (map (map go) ch)
       go (Widget w) = Widget (fw w)
-      go (Grafted g) = Grafted (bimap fa fw g)
+      go (Grafted g) = Grafted (bimap fa fw g) -- what if move it to first?
     in
       go v
 

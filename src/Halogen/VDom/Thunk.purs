@@ -24,6 +24,9 @@ foreign import data ThunkArg ∷ Type
 
 foreign import data ThunkId ∷ Type
 
+-- data Thunk f i = Thunk ThunkId (ThunkArg -> ThunkArg -> Boolean) (ThunkArg'a → f i) ThunkArg'a
+
+--- widget type can be a thunk
 data Thunk f i = Thunk ThunkId (Fn.Fn2 ThunkArg ThunkArg Boolean) (ThunkArg → f i) ThunkArg
 
 unsafeThunkId ∷ ∀ a. a → ThunkId
@@ -35,6 +38,7 @@ instance functorThunk ∷ Functor f ⇒ Functor (Thunk f) where
 hoist ∷ ∀ f g. (f ~> g) → Thunk f ~> Thunk g
 hoist = mapThunk
 
+-- bimap
 mapThunk ∷ ∀ f g i j. (f i -> g j) → Thunk f i -> Thunk g j
 mapThunk k (Thunk a b c d) = Thunk a b (c >>> k) d
 
@@ -45,14 +49,16 @@ thunk = Fn.mkFn4 \tid eqFn f a →
     (unsafeCoerce f ∷ ThunkArg → f i)
     (unsafeCoerce a ∷ ThunkArg)
 
+-- thunk with custom equality
 thunked ∷ ∀ a f i. (a → a → Boolean) → (a → f i) → a → Thunk f i
 thunked eqFn f =
   let
-    tid = unsafeThunkId { f }
+    tid = unsafeThunkId { f } -- thunk id is obj that contains a builder function WAT
     eqFn' = Fn.mkFn2 eqFn
   in
     \a → Fn.runFn4 thunk tid eqFn' f a
 
+-- thunk with refEq equiality (similar to thunked function)
 thunk1 ∷ ∀ a f i. Fn.Fn2 (a → f i) a (Thunk f i)
 thunk1 = Fn.mkFn2 \f a → Fn.runFn4 thunk (unsafeThunkId f) Util.refEq f a
 
@@ -81,16 +87,17 @@ runThunk ∷ ∀ f i. Thunk f i → f i
 runThunk (Thunk _ _ render arg) = render arg
 
 unsafeEqThunk ∷ ∀ f i. Fn.Fn2 (Thunk f i) (Thunk f i) Boolean
-unsafeEqThunk = Fn.mkFn2 \(Thunk a1 b1 _ d1) (Thunk a2 b2 _ d2) →
-  Fn.runFn2 Util.refEq a1 a2 &&
-  Fn.runFn2 Util.refEq b1 b2 &&
-  Fn.runFn2 b1 d1 d2
+unsafeEqThunk = Fn.mkFn2 \(Thunk id eqFn _ renderArg) (Thunk id' eqFn' _ renderArg') →
+  Fn.runFn2 Util.refEq id id' &&
+  Fn.runFn2 Util.refEq eqFn eqFn' &&
+  Fn.runFn2 eqFn renderArg renderArg'
 
 type ThunkState f i a w =
-  { thunk ∷ Thunk f i
+  { thunk ∷ Thunk f i -- old thunk
   , vdom ∷ M.Step (V.VDom a w) Node
   }
 
+-- WHY EQ FUNCTION IS NOT CALLED?????
 buildThunk
   ∷ ∀ f i a w
   . (f i → V.VDom a w)
@@ -100,16 +107,16 @@ buildThunk toVDom = renderThunk
   where
   renderThunk ∷ V.VDomSpec a w → V.Machine (Thunk f i) Node
   renderThunk spec = EFn.mkEffectFn1 \t → do
-    vdom ← EFn.runEffectFn1 (V.buildVDom spec) (toVDom (runThunk t))
+    vdom ← EFn.runEffectFn1 (V.buildVDom spec) ((toVDom :: (f i → V.VDom a w)) (runThunk t))
     pure $ M.mkStep $ M.Step (M.extract vdom) { thunk: t, vdom } patchThunk haltThunk
 
   patchThunk ∷ EFn.EffectFn2 (ThunkState f i a w) (Thunk f i) (V.Step (Thunk f i) Node)
   patchThunk = EFn.mkEffectFn2 \state t2 → do
     let { vdom: prev, thunk: t1 } = state
-    if Fn.runFn2 unsafeEqThunk t1 t2
-      then pure $ M.mkStep $ M.Step (M.extract prev) state patchThunk haltThunk
+    if Fn.runFn2 unsafeEqThunk t1 t2 -- if eq
+      then pure $ M.mkStep $ M.Step (M.extract prev) state patchThunk haltThunk -- dont run effect
       else do
-        vdom ← EFn.runEffectFn2 M.step prev (toVDom (runThunk t2))
+        vdom ← EFn.runEffectFn2 M.step prev (toVDom (runThunk t2)) -- else create new vdom, execute step (compare and patch if need)
         pure $ M.mkStep $ M.Step (M.extract vdom) { vdom, thunk: t2 } patchThunk haltThunk
 
   haltThunk ∷ EFn.EffectFn1 (ThunkState f i a w) Unit

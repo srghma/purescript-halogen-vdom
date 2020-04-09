@@ -14,13 +14,14 @@ render ∷ MyState → MyVDom
 
 main = do
   -- Build the initial machine
-  machine1 ← V.buildVDom myVDomSpec (render state1)
+  (machine1 :: VDomMachine a w) ← V.buildVDom myVDomSpec (render state1)
 
   -- Attach the output node to the DOM
+  -- `extract` attaches result of `machine1`, which is `DOM.Node`
   appendChildToBody (V.extract machine1)
 
   -- Patch
-  machine2 ← V.step machine1 (render state2)
+  machine2 ← V.step machine1 (render state2) -- `V.step` patches prev `DOM.Node` by running effects, `machine2` contains same `DOM.Node`
   machine3 ← V.step machine2 (render state3)
   ...
 ```

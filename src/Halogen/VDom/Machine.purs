@@ -16,10 +16,28 @@ import Unsafe.Coerce (unsafeCoerce)
 
 type Machine a b = EffectFn1 a (Step a b)
 
+{-
+a -> Step a b
+
+a -> forall state . Step b state (state -> a -> Step a b) (state -> Unit)
+a -> forall state . Step b state (state -> Machine a b) (state -> Unit)
+
+if we think that state is hidden, then machine
+
+type Machine a b = a -> Step a b
+type Machine a b = a -> (b, Machine a b, Effect Unit)
+
+output, state, func from state and input to new Step, finalizer
+
+
+TODO: when finalizer is called?
+-}
+
 data Step' a b s = Step b s (EffectFn2 s a (Step a b)) (EffectFn1 s Unit)
 
 foreign import data Step ∷ Type → Type → Type
 
+-- hides state type, makes it exsistential
 mkStep ∷ ∀ a b s. Step' a b s → Step a b
 mkStep = unsafeCoerce
 

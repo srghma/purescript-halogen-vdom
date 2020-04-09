@@ -11,6 +11,8 @@ module Halogen.VDom.DOM.Prop
 
 import Prelude
 
+{-- import Foreign.Object.ST (STObject) --}
+{-- import Foreign.Object.ST as STObject --}
 import Data.Function.Uncurried as Fn
 import Data.Maybe (Maybe(..))
 import Data.Nullable (null, toNullable)
@@ -21,20 +23,28 @@ import Effect.Uncurried as EFn
 import Foreign (typeOf)
 import Foreign.Object as Object
 import Halogen.VDom as V
-import Halogen.VDom.Machine (Step'(..), mkStep)
+import Halogen.VDom.Machine (Step, Step'(..), mkStep)
 import Halogen.VDom.Types (Namespace(..))
 import Halogen.VDom.Util as Util
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM.Element (Element) as DOM
 import Web.Event.Event (EventType(..), Event) as DOM
-import Web.Event.EventTarget (eventListener) as DOM
+import Web.Event.EventTarget (eventListener, EventListener) as DOM
 
 -- | Attributes, properties, event handlers, and element lifecycles.
 -- | Parameterized by the type of handlers outputs.
+
+-- | Attributes are defined by HTML. Properties (on DOM elements) are defined by DOM
+-- |
+-- | e.g. `class` attribute corresponds to `element.className` property
+-- | almost always you should use properties on html elements, the svg elements don't have properties, only classes
+-- | more https://github.com/purescript-halogen/purescript-halogen-vdom/issues/30#issuecomment-518015764
+-- |
+-- | attributes can be only strings, props - string, number, bool
 data Prop a
-  = Attribute (Maybe Namespace) String String
-  | Property String PropValue
-  | Handler DOM.EventType (DOM.Event → Maybe a)
+  = Attribute (Maybe Namespace) {- XML namespace -} String {- attribute -} String {- value -}
+  | Property String {- property, e.g. htmlFor (for attribute), className (class attribute) -} PropValue {- value -}
+  | Handler DOM.EventType (DOM.Event → Maybe a) -- in `H.div [HP.eventHandler (...), HP.eventHandler (...)]` - only last event handler is going to work
   | Ref (ElemRef DOM.Element → Maybe a)
 
 instance functorProp ∷ Functor Prop where
@@ -67,23 +77,43 @@ propFromNumber = unsafeCoerce
 -- | A `Machine`` for applying attributes, properties, and event handlers.
 -- | An emitter effect must be provided to respond to events. For example,
 -- | to allow arbitrary effects in event handlers, one could use `id`.
+
+-- | emitter vs effects handler:
+-- |   if Prop is attribute or property - nothing is emitted
+-- |   if Prop is event handler - emitter has type ``????
+-- |   if Prop is ref - emitter has type ``????
 buildProp
   ∷ ∀ a
-  . (a → Effect Unit)
+  . (a → Effect Unit) -- emitter
   → DOM.Element
-  → V.Machine (Array (Prop a)) Unit
+  → V.Machine (Array (Prop a)) Unit -- TODO: why array of properties??????????????????????????????????????
 buildProp emit el = renderProp
   where
+  -- what it does - creates a machine, that contains state
+  -- on next step - patch prop ?
+  -- on halt - all ref watchers are notified that element is removed
+  -- TODO: when events
+  -- TODO: how to unwrap machine
+  renderProp :: EFn.EffectFn1 (Array (Prop a)) (Step (Array (Prop a)) Unit)
   renderProp = EFn.mkEffectFn1 \ps1 → do
+    -- events :: STObject region (Tuple DOM.EventListener (Ref.Ref (DOM.Event -> Maybe a)))
+
+    -- e.g. event for property "class", listen only
     events ← Util.newMutMap
-    ps1' ← EFn.runEffectFn3 Util.strMapWithIxE ps1 propToStrKey (applyProp events)
+
+    -- for each prop in array:
+    --   if prop is attr - set attr to element
+    --   if prop is property - set property to element
+    --   if prop is handler for DOM.EventType -
+    (ps1' :: Object.Object (Prop a)) ← EFn.runEffectFn3 Util.strMapWithIxE ps1 propToStrKey (applyProp events)
     let
       state =
-        { events: Util.unsafeFreeze events
+        { events: Util.unsafeFreeze events -- Object (Tuple DOM.EventListener (Ref.Ref (DOM.Event -> Maybe a)))
         , props: ps1'
         }
     pure $ mkStep $ Step unit state patchProp haltProp
 
+  patchProp :: EFn.EffectFn2 { events :: Object.Object (Tuple DOM.EventListener (Ref.Ref (DOM.Event -> Maybe a))) , props :: Object.Object (Prop a) } (Array (Prop a)) (Step (Array (Prop a)) Unit)
   patchProp = EFn.mkEffectFn2 \state ps2 → do
     events ← Util.newMutMap
     let
@@ -109,6 +139,7 @@ buildProp emit el = renderProp
     Just a → emit a
     _ → pure unit
 
+  {-- applyProp :: STObject t0 (Tuple EventListener (Ref (Event -> Maybe a))) -> EffectFn3 String Int (Prop a) (Prop a) --}
   applyProp events = EFn.mkEffectFn3 \_ _ v →
     case v of
       Attribute ns attr val → do
@@ -119,15 +150,16 @@ buildProp emit el = renderProp
         pure v
       Handler (DOM.EventType ty) f → do
         case Fn.runFn2 Util.unsafeGetAny ty events of
+          -- if eventType is already present/listened - in events storage
           handler | Fn.runFn2 Util.unsafeHasAny ty events → do
-            Ref.write f (snd handler)
+            Ref.write f (snd handler) -- replace current event listener with new
             pure v
           _ → do
             ref ← Ref.new f
             listener ← DOM.eventListener \ev → do
-              f' ← Ref.read ref
+              (f' :: DOM.Event -> Maybe a) ← Ref.read ref
               EFn.runEffectFn1 mbEmit (f' ev)
-            EFn.runEffectFn3 Util.pokeMutMap ty (Tuple listener ref) events
+            EFn.runEffectFn3 Util.pokeMutMap ty (Tuple listener ref) events -- set/add to events map
             EFn.runEffectFn3 Util.addEventListener ty listener el
             pure v
       Ref f → do
@@ -192,9 +224,11 @@ setProperty = Util.unsafeSetAny
 unsafeGetProperty ∷ Fn.Fn2 String DOM.Element PropValue
 unsafeGetProperty = Util.unsafeGetAny
 
+-- removes if attr exists using el.removeAttributeNS() or el.removeAttribute()
+-- if property - sets to "", or undefined, or sets rowSpan or collSpan to 1
 removeProperty ∷ EFn.EffectFn2 String DOM.Element Unit
 removeProperty = EFn.mkEffectFn2 \key el →
-  EFn.runEffectFn3 Util.hasAttribute null key el >>= if _
+  EFn.runEffectFn3 Util.hasAttribute null {- Nullable Namespace -} key el >>= if _
     then EFn.runEffectFn3 Util.removeAttribute null key el
     else case typeOf (Fn.runFn2 Util.unsafeGetAny key el) of
       "string" → EFn.runEffectFn3 Util.unsafeSetAny key "" el

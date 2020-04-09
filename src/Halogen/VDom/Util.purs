@@ -48,7 +48,7 @@ import Web.DOM.Element (Element) as DOM
 import Web.DOM.Node (Node) as DOM
 import Web.Event.EventTarget (EventListener) as DOM
 
-newMutMap ∷ ∀ r a. Effect (STObject r a)
+newMutMap ∷ ∀ r a. Effect (STObject r a) -- STObject that escaped it's region, r is kind Region
 newMutMap = unsafeCoerce STObject.new
 
 pokeMutMap ∷ ∀ r a. EFn.EffectFn3 String a (STObject r a) Unit
@@ -126,10 +126,10 @@ foreign import diffWithKeyAndIxE
 foreign import strMapWithIxE
   ∷ ∀ a b
   . EFn.EffectFn3
-      (Array a)
-      (a → String)
-      (EFn.EffectFn3 String Int a b)
-      (Object.Object b)
+      (Array a) -- props
+      (a → String) -- propToStrKey
+      (EFn.EffectFn3 String Int a b) -- action, executed on each array element, (StrKey -> Index -> Element -> b)
+      (Object.Object b) -- b is added to object, { StrKey -> b }
 
 foreign import refEq
   ∷ ∀ a b. Fn.Fn2 a b Boolean
