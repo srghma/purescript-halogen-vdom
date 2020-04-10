@@ -103,33 +103,33 @@ foreign import replicateE
       Unit
 
 foreign import diffWithIxE
-  ∷ ∀ b c d
+  ∷ ∀ oldElem newElem output dismissed
   . EFn.EffectFn5
-      (Array b)
-      (Array c)
-      (EFn.EffectFn3 Int b c d)
-      (EFn.EffectFn2 Int b Unit)
-      (EFn.EffectFn2 Int c d)
-      (Array d)
+      (Array oldElem)
+      (Array newElem)
+      (EFn.EffectFn3 Int oldElem newElem output) -- both elems are found, remove old, add new
+      (EFn.EffectFn2 Int oldElem dismissed) -- only oldElem is found, there are no elems left in `Array newElem`
+      (EFn.EffectFn2 Int newElem output) -- vice versa
+      (Array output)
 
 foreign import diffWithKeyAndIxE
-  ∷ ∀ a b c d
+  ∷ ∀ oldElem newElemWithKey output dismissed
   . EFn.EffectFn6
-      (Object.Object a)
-      (Array b)
-      (b → String)
-      (EFn.EffectFn4 String Int a b c)
-      (EFn.EffectFn2 String a d)
-      (EFn.EffectFn3 String Int b c)
-      (Object.Object c)
+      (Object.Object oldElem)
+      (Array newElemWithKey)
+      (newElemWithKey → String)
+      (EFn.EffectFn4 String Int oldElem newElemWithKey output)
+      (EFn.EffectFn2 String oldElem dismissed)
+      (EFn.EffectFn3 String Int newElemWithKey output)
+      (Object.Object output)
 
 foreign import strMapWithIxE
-  ∷ ∀ a b
+  ∷ ∀ child output
   . EFn.EffectFn3
-      (Array a) -- props
-      (a → String) -- propToStrKey
-      (EFn.EffectFn3 String Int a b) -- action, executed on each array element, (StrKey -> Index -> Element -> b)
-      (Object.Object b) -- b is added to object, { StrKey -> b }
+      (Array child) -- children
+      (child → String) -- propToStrKey
+      (EFn.EffectFn3 String Int child output) -- action, executed on each array element, (StrKey -> Index -> child -> b)
+      (Object.Object output) -- b is added to object, { StrKey -> b }
 
 foreign import refEq
   ∷ ∀ a b. Fn.Fn2 a b Boolean
@@ -143,6 +143,7 @@ foreign import setTextContent
 foreign import createElement
   ∷ EFn.EffectFn3 (Nullable Namespace) ElemName DOM.Document DOM.Element
 
+-- insert new child at index (if there is already an element on that index, it is moved below)
 foreign import insertChildIx
   ∷ EFn.EffectFn3 Int DOM.Node DOM.Node Unit
 

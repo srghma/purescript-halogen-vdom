@@ -42,9 +42,18 @@ import Web.Event.EventTarget (eventListener, EventListener) as DOM
 -- |
 -- | attributes can be only strings, props - string, number, bool
 data Prop a
-  = Attribute (Maybe Namespace) {- XML namespace -} String {- attribute -} String {- value -}
-  | Property String {- property, e.g. htmlFor (for attribute), className (class attribute) -} PropValue {- value -}
-  | Handler DOM.EventType (DOM.Event → Maybe a) -- in `H.div [HP.eventHandler (...), HP.eventHandler (...)]` - only last event handler is going to work
+  = Attribute
+    (Maybe Namespace) -- XML namespace
+    String -- attribute
+    String -- value
+  | Property
+    String -- property, e.g. htmlFor (for attribute), className (class attribute) -}
+    PropValue
+  | Handler
+    DOM.EventType -- listen only this event type, dont react on others
+    (DOM.Event → Maybe a) -- build input for emitter (https://github.com/purescript-halogen/purescript-halogen/blob/bb715fe5c06ba3048f4d8b377ec842cd8cf37833/src/Halogen/Query/Input.purs#L15-L17)
+    -- NOTE:
+    -- in `H.div [HP.eventHandler (...), HP.eventHandler (...)]` - only last event handler is going to work
   | Ref (ElemRef DOM.Element → Maybe a)
 
 instance functorProp ∷ Functor Prop where
@@ -102,14 +111,15 @@ buildProp emit el = renderProp
     events ← Util.newMutMap
 
     -- for each prop in array:
-    --   if prop is attr - set attr to element
-    --   if prop is property - set property to element
-    --   if prop is handler for DOM.EventType -
-    (ps1' :: Object.Object (Prop a)) ← EFn.runEffectFn3 Util.strMapWithIxE ps1 propToStrKey (applyProp events)
+    --   if prop is attr - set attr to element, store attr under "attr/XXX" key in a returned object
+    --   if prop is property - set property to element, store property under "prop/XXX" key in a returned object
+    --   if prop is handler for DOM.EventType - start listen and add listener to `events` mutable map, store handler under "handler/EVENTTYPE" in a returned object
+    --   if prop is ref updater - store `emitterInputBuilder` in under a `ref` key in a returned object, call `emitter` on creation of all props (now) and on halt of all props (later)
+    (props :: Object.Object (Prop a)) ← EFn.runEffectFn3 Util.strMapWithIxE ps1 propToStrKey (applyProp events)
     let
       state =
         { events: Util.unsafeFreeze events -- Object (Tuple DOM.EventListener (Ref.Ref (DOM.Event -> Maybe a)))
-        , props: ps1'
+        , props
         }
     pure $ mkStep $ Step unit state patchProp haltProp
 
@@ -131,8 +141,8 @@ buildProp emit el = renderProp
 
   haltProp = EFn.mkEffectFn1 \state → do
     case Object.lookup "ref" state.props of
-      Just (Ref f) →
-        EFn.runEffectFn1 mbEmit (f (Removed el))
+      Just (Ref emitterInputBuilder) →
+        EFn.runEffectFn1 mbEmit (emitterInputBuilder (Removed el))
       _ → pure unit
 
   mbEmit = EFn.mkEffectFn1 case _ of
@@ -148,24 +158,29 @@ buildProp emit el = renderProp
       Property prop val → do
         EFn.runEffectFn3 setProperty prop val el
         pure v
-      Handler (DOM.EventType ty) f → do
-        case Fn.runFn2 Util.unsafeGetAny ty events of
+      Handler (DOM.EventType eventType) emitterInputBuilder → do
+        case Fn.runFn2 Util.unsafeGetAny eventType events of
           -- if eventType is already present/listened - in events storage
-          handler | Fn.runFn2 Util.unsafeHasAny ty events → do
-            Ref.write f (snd handler) -- replace current event listener with new
+          handler | Fn.runFn2 Util.unsafeHasAny eventType events → do
+            Ref.write emitterInputBuilder (snd handler) -- replace current event listener with new
             pure v
           _ → do
-            ref ← Ref.new f
+            ref ← Ref.new emitterInputBuilder
             listener ← DOM.eventListener \ev → do
-              (f' :: DOM.Event -> Maybe a) ← Ref.read ref
-              EFn.runEffectFn1 mbEmit (f' ev)
-            EFn.runEffectFn3 Util.pokeMutMap ty (Tuple listener ref) events -- set/add to events map
-            EFn.runEffectFn3 Util.addEventListener ty listener el
+              (emitterInputBuilder' :: DOM.Event -> Maybe a) ← Ref.read ref
+              EFn.runEffectFn1 mbEmit (emitterInputBuilder' ev)
+
+            -- set/add to events map, key is eventType, value contains element listener (so we can remove it on halt) AND current emitterInputBuilder
+            EFn.runEffectFn3 Util.pokeMutMap eventType (Tuple listener ref) events
+
+            -- listen events of that type on the element
+            EFn.runEffectFn3 Util.addEventListener eventType listener el
             pure v
-      Ref f → do
-        EFn.runEffectFn1 mbEmit (f (Created el))
+      Ref emitterInputBuilder → do
+        EFn.runEffectFn1 mbEmit (emitterInputBuilder (Created el))
         pure v
 
+  -- diffProp :: Fn2 (Object (Tuple EventListener (Ref (Event -> Maybe a)))) (STObject t1 (Tuple EventListener (Ref (Event -> Maybe a)))) (EffectFn4 String Int (Prop a) (Prop a) (Prop a))
   diffProp = Fn.mkFn2 \prevEvents events → EFn.mkEffectFn4 \_ _ v1 v2 →
     case v1, v2 of
       Attribute _ _ val1, Attribute ns2 attr2 val2 →
@@ -188,10 +203,10 @@ buildProp emit el = renderProp
           _, _ → do
             EFn.runEffectFn3 setProperty prop2 val2 el
             pure v2
-      Handler _ _, Handler (DOM.EventType ty) f → do
+      Handler _ _, Handler (DOM.EventType ty) emitterInputBuilder → do
         let
           handler = Fn.runFn2 Util.unsafeLookup ty prevEvents
-        Ref.write f (snd handler)
+        Ref.write emitterInputBuilder (snd handler)
         EFn.runEffectFn3 Util.pokeMutMap ty handler events
         pure v2
       _, _ →

@@ -24,10 +24,15 @@ foreign import data ThunkArg ∷ Type
 
 foreign import data ThunkId ∷ Type
 
--- data Thunk f i = Thunk ThunkId (ThunkArg -> ThunkArg -> Boolean) (ThunkArg'a → f i) ThunkArg'a
+-- data Thunk f i = Thunk ThunkId (ThunkArg'a -> ThunkArg'b -> Boolean) (ThunkArg'a → f i) ThunkArg'a
 
 --- widget type can be a thunk
-data Thunk f i = Thunk ThunkId (Fn.Fn2 ThunkArg ThunkArg Boolean) (ThunkArg → f i) ThunkArg
+data Thunk f i
+  = Thunk
+    ThunkId
+    (Fn.Fn2 ThunkArg ThunkArg Boolean) -- (oldArg -> newArg -> isEqual)
+    (ThunkArg → f i) -- (oldArg -> output)
+    ThunkArg -- oldArg
 
 unsafeThunkId ∷ ∀ a. a → ThunkId
 unsafeThunkId = unsafeCoerce
@@ -53,12 +58,136 @@ thunk = Fn.mkFn4 \tid eqFn f a →
 thunked ∷ ∀ a f i. (a → a → Boolean) → (a → f i) → a → Thunk f i
 thunked eqFn f =
   let
-    tid = unsafeThunkId { f } -- thunk id is obj that contains a builder function WAT
+    tid = unsafeThunkId { f }
     eqFn' = Fn.mkFn2 eqFn
   in
     \a → Fn.runFn4 thunk tid eqFn' f a
 
--- thunk with refEq equiality (similar to thunked function)
+
+{-
+
+var thunked = function (eqFn) {
+    return function (f) {
+        var tid = unsafeThunkId({
+            f: f
+        });
+        var eqFn$prime = Data_Function_Uncurried.mkFn2(eqFn);
+        return function (a) {
+            return thunk(tid, eqFn$prime, f, a);
+        };
+    };
+};
+
+var eqString = new Eq($foreign.eqStringImpl);
+
+var eqArray = function (dictEq) {
+    return new Eq($foreign.eqArrayImpl(eq(dictEq)));
+};
+
+
+-}
+
+
+{-
+
+thunkCreator :: forall a . Eq a => a -> Thunk Array Int
+thunkCreator = thunked eq (\a -> [42])
+foo = fooFn "a"
+bar = fooFn "a"
+
+-- `is_eq` would return `true` if `thunked` was written without creating unique reference `tid = unsafeThunkId f`
+-- BUT it returns `false` with current implementation `tid = unsafeThunkId { f }`
+-- we are forced to fix `a` type beforehand to make it work
+
+is_eq = Fn.runFn2 unsafeEqThunk foo bar
+
+------
+
+var thunkCreator = function (dictEq) {
+    return thunked(Data_Eq.eq(dictEq))(function (a) {
+        return [ 42 ];
+    });
+};
+var foo = thunkCreator(Data_Eq.eqString)("a");
+var bar = thunkCreator(Data_Eq.eqString)("a");
+var is_eq = unsafeEqThunk(foo, bar);
+
+------------------------------------------
+
+
+thunkCreator :: String -> Thunk Array Int
+thunkCreator = thunked eq (\a -> [42])
+foo = thunkCreator "a"
+bar = thunkCreator "a"
+
+-- `is_eq` would return `true` if `thunked` was written without creating unique reference `tid = unsafeThunkId f`
+-- AND it returns `true` with current implementation `tid = unsafeThunkId { f }`
+-- everything works correctly
+
+is_eq = Fn.runFn2 unsafeEqThunk foo bar
+
+------
+
+var thunkCreator = thunked(Data_Eq.eq(Data_Eq.eqString))(function (a) {
+    return [ 42 ];
+});
+var foo = thunkCreator("a");
+var bar = thunkCreator("a");
+var is_eq = unsafeEqThunk(foo, bar);
+
+------------------------------------------
+
+
+thunkCreator :: forall a . Eq a => a -> Thunk Array Int
+thunkCreator = thunked eq (\a -> [42])
+foo = thunkCreator ["a"]
+bar = thunkCreator ["a"]
+
+-- `is_eq` would return `false` if `thunked` was written without creating unique reference `tid = unsafeThunkId f`
+-- (because `Data_Eq.eqArray` always returns new dictionary)
+-- AND it returns `false` with current implementation `tid = unsafeThunkId { f }`.
+-- We are forced to fix `a` type beforehand to make it work
+
+is_eq = Fn.runFn2 unsafeEqThunk foo bar
+
+------
+
+
+var thunkCreator = function (dictEq) {
+    return thunked(Data_Eq.eq(dictEq))(function (a) {
+        return [ 42 ];
+    });
+};
+var foo = thunkCreator(Data_Eq.eqArray(Data_Eq.eqString))([ "a" ]);
+var bar = thunkCreator(Data_Eq.eqArray(Data_Eq.eqString))([ "a" ]);
+var is_eq = unsafeEqThunk(foo, bar);
+
+------------------------------------------
+
+thunkCreator :: [String] -> Thunk Array Int
+thunkCreator = thunked eq (\a -> [42])
+foo = thunkCreator ["a"]
+bar = thunkCreator ["a"]
+
+-- it returns `true` with current implementation
+
+is_eq = Fn.runFn2 unsafeEqThunk foo bar
+
+------
+
+var thunkCreator = thunked(Data_Eq.eq(Data_Eq.eqArray(Data_Eq.eqString)))(function (a) {
+    return [ 42 ];
+});
+var foo = thunkCreator("a");
+var bar = thunkCreator("a");
+var is_eq = unsafeEqThunk(foo, bar);
+
+------------------------------------------
+
+-}
+
+
+-- thunk with refEq equality (similar to thunked function)
 thunk1 ∷ ∀ a f i. Fn.Fn2 (a → f i) a (Thunk f i)
 thunk1 = Fn.mkFn2 \f a → Fn.runFn4 thunk (unsafeThunkId f) Util.refEq f a
 
@@ -97,7 +226,6 @@ type ThunkState f i a w =
   , vdom ∷ M.Step (V.VDom a w) Node
   }
 
--- WHY EQ FUNCTION IS NOT CALLED?????
 buildThunk
   ∷ ∀ f i a w
   . (f i → V.VDom a w)

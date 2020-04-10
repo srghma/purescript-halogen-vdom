@@ -66,12 +66,12 @@ exports.diffWithIxE = function (a1, a2, f1, f2, f3) {
   return a3;
 };
 
-exports.strMapWithIxE = function (as, fk, f) {
+exports.strMapWithIxE = function (children, propToStrKey, f) {
   var o = {};
-  for (var i = 0; i < as.length; i++) {
-    var a = as[i];
-    var k = fk(a);
-    o[k] = f(k, i, a);
+  for (var index = 0; index < children.length; i++) {
+    var child = children[index];
+    var key = propToStrKey(child);
+    o[key] = f(key, index, child);
   }
   return o;
 };
@@ -116,10 +116,10 @@ exports.createElement = function (ns, name, doc) {
   }
 };
 
-exports.insertChildIx = function (i, a, b) {
-  var n = b.childNodes.item(i) || null;
+exports.insertChildIx = function (i, a, parent) {
+  var n = parent.childNodes.item(i) || null;
   if (n !== a) {
-    b.insertBefore(a, n);
+    parent.insertBefore(a, n);
   }
 };
 

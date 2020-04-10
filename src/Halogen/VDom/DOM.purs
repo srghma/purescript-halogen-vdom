@@ -40,9 +40,18 @@ type VDomBuilder4 i j k l a w = EFn.EffectFn6 (VDomSpec a w) (VDomMachine a w) i
 -- | Widget machines recursively reference the configured spec to potentially
 -- | enable recursive trees of Widgets.
 newtype VDomSpec a w = VDomSpec
-  { buildWidget ∷ VDomSpec a w → Machine w DOM.Node -- contains recursive ref
+  -- contains recursive ref. E.g. machine that diffrentiates between component widget and thunked widget
+  { buildWidget ∷ VDomSpec a w → Machine w DOM.Node
+  -- example:
+
+  -- buildAttributes = buildProps handler
+  -- https://github.com/purescript-halogen/purescript-halogen/blob/bb715fe5c06ba3048f4d8b377ec842cd8cf37833/src/Halogen/VDom/Driver.purs#L68-L71
+
+  -- what is handler
+  -- https://github.com/purescript-halogen/purescript-halogen/blob/bb715fe5c06ba3048f4d8b377ec842cd8cf37833/src/Halogen/Aff/Driver.purs#L203
   , buildAttributes ∷ DOM.Element → Machine a Unit
-  , document ∷ DOM.Document -- TODO: why?
+  -- VDom can be attached to any node, but we need document to be able to call `document.createElement` function
+  , document ∷ DOM.Document
   }
 
 -- | Starts an initial `VDom` machine by providing a `VDomSpec`.
@@ -60,9 +69,9 @@ buildVDom spec = build -- initial vdomTree
   build = EFn.mkEffectFn1 case _ of
     Text s → EFn.runEffectFn3 buildText spec build s -- build text machine
     Elem ns n a ch → EFn.runEffectFn6 buildElem spec build ns n a ch
-    Keyed ns n a ch → EFn.runEffectFn6 buildKeyed spec build ns n a ch
-    Widget w → EFn.runEffectFn3 buildWidget spec build w -- TODO: ????
-    Grafted g → EFn.runEffectFn1 build (runGraft g) -- TODO: ????
+    Keyed ns n a keyedCh → EFn.runEffectFn6 buildKeyed spec build ns n a keyedCh
+    Widget w → EFn.runEffectFn3 buildWidget spec build w -- machine that has full control of it's lifecycle
+    Grafted g → EFn.runEffectFn1 build (runGraft g) -- optimization
 
 type TextState a w =
   { build ∷ VDomMachine a w
@@ -77,11 +86,11 @@ buildText = EFn.mkEffectFn3 \(VDomSpec spec) build s → do
   pure $ mkStep $ Step node state patchText haltText
 
 patchText ∷ ∀ a w. EFn.EffectFn2 (TextState a w) (VDom a w) (VDomStep a w)
-patchText = EFn.mkEffectFn2 \state vdom → do
+patchText = EFn.mkEffectFn2 \state newVdom → do
   let { build, node, value: value1 } = state
-  case vdom of
+  case newVdom of
     Grafted g →
-      EFn.runEffectFn2 patchText state (runGraft g)
+      EFn.runEffectFn2 patchText state (runGraft g) -- before there was a Text on this place. We call patchText instead of patch to be able to remove text
     Text value2
       | value1 == value2 →
           pure $ mkStep $ Step node state patchText haltText
@@ -91,7 +100,7 @@ patchText = EFn.mkEffectFn2 \state vdom → do
           pure $ mkStep $ Step node nextState patchText haltText
     _ → do
       EFn.runEffectFn1 haltText state
-      EFn.runEffectFn1 build vdom
+      EFn.runEffectFn1 build newVdom
 
 haltText ∷ ∀ a w. EFn.EffectFn1 (TextState a w) Unit
 haltText = EFn.mkEffectFn1 \{ node } → do
@@ -113,11 +122,11 @@ buildElem = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
   let
     node = DOMElement.toNode el
     onChild = EFn.mkEffectFn2 \ix child → do
-      res ← EFn.runEffectFn1 build child
-      EFn.runEffectFn3 Util.insertChildIx ix (extract res) node
-      pure res
+      res ← EFn.runEffectFn1 build child -- build
+      EFn.runEffectFn3 Util.insertChildIx ix (extract res) node -- insert
+      pure res -- return steps
   children ← EFn.runEffectFn2 Util.forE ch1 onChild
-  attrs ← EFn.runEffectFn1 (spec.buildAttributes el) as1
+  attrs ← EFn.runEffectFn1 (spec.buildAttributes el) as1 -- build machine that takes attributes
   let
     state =
       { build
@@ -135,7 +144,7 @@ patchElem = EFn.mkEffectFn2 \state vdom → do
   case vdom of
     Grafted g →
       EFn.runEffectFn2 patchElem state (runGraft g)
-    Elem ns2 name2 as2 ch2 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 → do
+    Elem ns2 name2 as2 ch2 | Fn.runFn4 eqElemSpec ns1 name1 ns2 name2 → do -- if new vdom is elem and new and old are equal
       case Array.length ch1, Array.length ch2 of
         0, 0 → do
           attrs2 ← EFn.runEffectFn2 step attrs as2
@@ -151,13 +160,20 @@ patchElem = EFn.mkEffectFn2 \state vdom → do
           pure $ mkStep $ Step node nextState patchElem haltElem
         _, _ → do
           let
-            onThese = EFn.mkEffectFn3 \ix s v → do
-              res ← EFn.runEffectFn2 step s v
+            -- both elements are found
+            onThese = EFn.mkEffectFn3 \ix (ch1Elem :: VDomStep a w) (ch2Elem :: VDom a w) → do
+              -- execute step function (compare previous dom and ch2Elem, the patchXXX function will be called for that element
+              -- if elements different - old element is removed from DOM, replaced with new but not yet attached to DOM
+              res ← EFn.runEffectFn2 step ch1Elem ch2Elem
               EFn.runEffectFn3 Util.insertChildIx ix (extract res) node
               pure res
-            onThis = EFn.mkEffectFn2 \ix s → EFn.runEffectFn1 halt s
-            onThat = EFn.mkEffectFn2 \ix v → do
-              res ← EFn.runEffectFn1 build v
+
+            -- there are no more new elements in the new list, but there is an element in old list
+            onThis = EFn.mkEffectFn2 \ix ch1Elem → EFn.runEffectFn1 halt ch1Elem
+
+            -- there are no more new elements in the old list, but there is an element in new list
+            onThat = EFn.mkEffectFn2 \ix ch2Elem → do
+              res ← EFn.runEffectFn1 build ch2Elem
               EFn.runEffectFn3 Util.insertChildIx ix (extract res) node
               pure res
           children2 ← EFn.runEffectFn5 Util.diffWithIxE ch1 ch2 onThese onThis onThat
@@ -202,7 +218,7 @@ buildKeyed = EFn.mkEffectFn6 \(VDomSpec spec) build ns1 name1 as1 ch1 → do
       res ← EFn.runEffectFn1 build vdom
       EFn.runEffectFn3 Util.insertChildIx ix (extract res) node
       pure res
-  children ← EFn.runEffectFn3 Util.strMapWithIxE ch1 fst onChild
+  children ← EFn.runEffectFn3 Util.strMapWithIxE ch1 fst onChild -- build keyed childrens
   attrs ← EFn.runEffectFn1 (spec.buildAttributes el) as1
   let
     state =
