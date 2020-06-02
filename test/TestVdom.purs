@@ -15,6 +15,8 @@ import Web.DOM.Document (Document) as DOM
 import Web.DOM.Element (Element) as DOM
 import Halogen.VDom.Machine (Machine)
 import Effect (Effect)
+import Control.Lazy as CL
+import Data.Lazy as DL
 
 infixr 1 prop as :=
 
@@ -43,13 +45,23 @@ thunk render val = VDom $ V.Widget $ Fn.runFn2 thunk1 render val
 myfn :: ((Void → Effect Unit) -> DOM.Element -> Machine (Array (Prop Void)) Unit) → DOM.Element → Machine (Array (Prop Void)) Unit
 myfn buildProp element = buildProp (const (pure unit)) element
 
+type As a = a -> a
+
+foreign import fixPure :: forall a. ((Unit -> a) -> a) -> a
+
 mkSpec
   ∷ DOM.Document
   → V.VDomSpec (Array (Prop Void)) (Thunk VDom Void)
-mkSpec document = V.VDomSpec
-  { buildWidget: buildThunk (un VDom)
-  , hydrateWidget: hydrateThunk (un VDom)
-  , buildAttributes: buildProp (const (pure unit))
-  , hydrateAttributes: hydrateProp (const (pure unit))
-  , document
-  }
+mkSpec document = DL.force (CL.fix go)
+  where
+    go :: As (DL.Lazy (V.VDomSpec (Array (Prop Void)) (Thunk VDom Void)))
+    go lazySpec =
+      let self = DL.force lazySpec
+       in DL.defer \_ ->
+         V.VDomSpec
+           { buildWidget: buildThunk (un VDom) self
+           , hydrateWidget: hydrateThunk (un VDom) self
+           , buildAttributes: buildProp (const (pure unit))
+           , hydrateAttributes: hydrateProp (const (pure unit))
+           , document
+           }

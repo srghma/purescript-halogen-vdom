@@ -15,7 +15,7 @@ type WidgetState a w =
 
 hydrateWidget ∷ ∀ a w. VDomHydrator w a w
 hydrateWidget = EFn.mkEffectFn5 \elem (VDomSpec spec) _hydrate build w → do
-  res ← EFn.runEffectFn1 (spec.hydrateWidget (VDomSpec spec) elem) w
+  res ← EFn.runEffectFn1 (spec.hydrateWidget elem) w
   let
     res' :: Step (VDom a w) DOM.Node
     res' = res # unStep \(Step n s k1 k2) →
@@ -24,7 +24,7 @@ hydrateWidget = EFn.mkEffectFn5 \elem (VDomSpec spec) _hydrate build w → do
 
 buildWidget ∷ ∀ a w. VDomBuilder w a w
 buildWidget = EFn.mkEffectFn3 \(VDomSpec spec) build w → do
-  res ← EFn.runEffectFn1 (spec.buildWidget (VDomSpec spec)) w
+  res ← EFn.runEffectFn1 spec.buildWidget w
   let
     res' :: Step (VDom a w) DOM.Node
     res' = res # unStep \(Step n s k1 k2) →

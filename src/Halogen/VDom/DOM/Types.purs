@@ -43,8 +43,8 @@ type VDomHydrator4 i j k l a w
 -- | Widget machines recursively reference the configured spec to potentially
 -- | enable recursive trees of Widgets.
 newtype VDomSpec a w = VDomSpec
-  { buildWidget ∷ VDomSpec a w → Machine w DOM.Node -- `buildWidget` takes a circular reference to the `VDomSpec`
-  , hydrateWidget ∷ VDomSpec a w → DOM.Element → Machine w DOM.Node
+  { buildWidget ∷ Machine w DOM.Node -- `buildWidget` takes a circular reference to the `VDomSpec`
+  , hydrateWidget ∷ DOM.Element → Machine w DOM.Node
 
   , buildAttributes ∷ DOM.Element → Machine a Unit
   , hydrateAttributes ∷ DOM.Element → Machine a Unit
