@@ -1,9 +1,10 @@
 package:
   name: halogen-vdom-test-hydration
-  dependencies: 
+  dependencies:
     - halogen-vdom
     - halogen-vdom-string-renderer
   test:
     main: Test.Hydration
     dependencies:
       - spec
+      - spec-node

@@ -6,7 +6,7 @@ import Control.Monad.Error.Class (class MonadThrow)
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Effect.Aff (launchAff_, throwError)
+import Effect.Aff (throwError)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Exception (Error, error)
 import Test.Hydration.Basic ((.=), (:=))
@@ -17,7 +17,7 @@ import Test.Hydration.Render as Render
 import Test.Spec (describe, it)
 import Test.Spec.Assertions (expectError, shouldReturn)
 import Test.Spec.Reporter (consoleReporter)
-import Test.Spec.Runner (runSpec)
+import Test.Spec.Runner.Node (runSpecAndExitProcess)
 import Web.DOM (Document, Node) as DOM
 import Web.DOM.Element as Element
 import Web.DOM.ParentNode (QuerySelector(..), querySelector) as DOM
@@ -63,7 +63,7 @@ renderHydrate renderFn = liftEffect do
   void $ Driver.hydrateUI document initialNode driverSpec
 
 main ∷ Effect Unit
-main = launchAff_ $ runSpec [ consoleReporter ] do
+main = runSpecAndExitProcess [ consoleReporter ] do
   describe "Hydration" do
     it "works" do
       let

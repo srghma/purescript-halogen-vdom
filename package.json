@@ -3,14 +3,15 @@
   "scripts": {
     "clean": "rimraf output",
     "build": "spago build",
+    "perf:bundle": "spago bundle --package halogen-vdom --module Test.Main --outfile app.js",
+    "perf:bundle:optimized": "purs-backend-es bundle-app --main Test.Main --to app.js",
+    "perf:open": "xdg-open ./index.html",
     "test": "pnpm test:hydration",
     "test:hydration": "spago test -p halogen-vdom-test-hydration"
   },
   "devDependencies": {
-    "jsdom": "^24.1.0",
-    "purescript": "^0.15.15",
+    "jsdom": "^26.1.0",
     "purs-tidy": "^0.11.0",
-    "rimraf": "^5.0.7",
-    "spago": "^0.93.32"
+    "rimraf": "^6.0.1"
   }
 }
