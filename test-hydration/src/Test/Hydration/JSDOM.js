@@ -1,19 +1,5 @@
 import { JSDOM } from "jsdom";
 
-export function make(content) {
-  return () => {
-    return new JSDOM(content);
-  };
-};
-
-export function window(jsdom) {
-  return () => {
-    return jsdom.window;
-  };
-};
-
-export function serialize(jsdom) {
-  return () => {
-    return jsdom.serialize();
-  };
-};
+export const makeImpl = content => new JSDOM(content)
+export const windowImpl = jsdom => jsdom.window;
+export const serializeImpl = jsdom => jsdom.serialize();

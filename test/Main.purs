@@ -10,6 +10,7 @@ import Data.Newtype (class Newtype, un, wrap)
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Ref as Ref
+import Effect.Uncurried (EffectFn1, EffectFn2, runEffectFn1, runEffectFn2)
 import Effect.Uncurried as EFn
 import Halogen.VDom as V
 import Halogen.VDom.DOM.Prop (Prop(..), propFromString, buildProp)
@@ -125,9 +126,15 @@ foreign import getTimeout ∷ Effect Int
 
 foreign import pingRenderRate ∷ Effect Unit
 
-foreign import requestAnimationFrame ∷ Effect Unit → Effect Unit
+foreign import requestAnimationFrameImpl :: EffectFn1 (Effect Unit) Unit
 
-foreign import setTimeout :: Int -> Effect Unit -> Effect Int
+requestAnimationFrame :: Effect Unit -> Effect Unit
+requestAnimationFrame = runEffectFn1 requestAnimationFrameImpl
+
+foreign import setTimeoutImpl :: EffectFn2 Int (Effect Unit) Int
+
+setTimeout :: Int -> Effect Unit -> Effect Int
+setTimeout = runEffectFn2 setTimeoutImpl
 
 mkRenderQueue
   ∷ ∀ a
